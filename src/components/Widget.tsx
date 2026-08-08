@@ -380,6 +380,37 @@ export function Widget({ id, x, y, width, height, children, settingsContent, pre
     bodyDrag.current = null
   }
 
+  // ── Commit drag on pointer cancel (touchscreen browser gesture takeover) ──
+  // On touch devices the browser fires pointercancel instead of pointerup when it
+  // decides to take over the touch gesture (e.g. system scroll, notification shade).
+  // Previously this snapped the widget back to its drag-start position.  Instead we
+  // now commit the last tracked position (posRef.current) so the widget stays where
+  // the finger left it — matching the behaviour users expect from a native drag.
+  function onBodyCancel(e: React.PointerEvent) {
+    const bd = bodyDrag.current
+    if (!bd || e.pointerId !== bd.pointerId) return
+    if (bd.dragging) {
+      // Use the last position tracked by onBodyMove (posRef.current) as the final rect.
+      // We cannot rely on e.clientX/clientY from a cancel event — they may be 0,0.
+      const finalRect = { ...posRef.current, ...sizeRef.current }
+      // Use widget centre as the cursor point since we have no reliable pointer coords.
+      const cursorPt = {
+        x: finalRect.x + finalRect.width  / 2,
+        y: finalRect.y + finalRect.height / 2,
+      }
+      updateLayout(id, finalRect)
+      onDropped?.(finalRect, cursorPt)
+      onDragEnd?.()
+      setDragging(false)
+      // Slot-assigned widgets snap back to their slot (same rule as onBodyUp).
+      if (slotAssigned) {
+        setPos({ x, y })
+        posRef.current = { x, y }
+      }
+    }
+    bodyDrag.current = null
+  }
+
   // ── Render ────────────────────────────────────────────────────────
   const isActive    = active || showSettings || fullscreen
   const widgetStyle = useWhiteboardStore((s) => {
@@ -437,13 +468,7 @@ export function Widget({ id, x, y, width, height, children, settingsContent, pre
       onPointerDown={onBodyDown}
       onPointerMove={onBodyMove}
       onPointerUp={onBodyUp}
-      onPointerCancel={(e) => {
-        const bd = bodyDrag.current
-        if (bd && e.pointerId === bd.pointerId) {
-          if (bd.dragging) { setPos({ x: bd.startX, y: bd.startY }); posRef.current = { x: bd.startX, y: bd.startY }; setDragging(false) }
-          bodyDrag.current = null
-        }
-      }}
+      onPointerCancel={onBodyCancel}
       onTouchStart={onContainerTouchStart}
       onTouchMove={onContainerTouchMove}
       onTouchEnd={onContainerTouchEnd}
